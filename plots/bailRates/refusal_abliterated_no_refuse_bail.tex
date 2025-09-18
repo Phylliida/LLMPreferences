@@ -1,0 +1,116 @@
+
+% median: 0.014171779141104294
+
+\begin{tikzpicture}
+\definecolor{bailtool}{RGB}{155, 89, 182}                  % Purple (warm undertones)
+\definecolor{bailstring}{RGB}{231, 76, 60}                 % Bright Red
+\definecolor{bailpromptcontinuefirst}{RGB}{230, 126, 34}   % Standard Orange
+\definecolor{bailpromptbailfirst}{RGB}{243, 156, 18}       % Golden Orange
+\definecolor{bailpromptunknown}{RGB}{149,165,166}          % Gray
+\usetikzlibrary{patterns}
+\pgfplotstableread{
+Label toolBailPr toolBailPr_err strBailPr strBailPr_err promptBailFirstBailPr promptBailFirstBailPr_err promptBailFirstUnknownPr promptContinueFirstBailPr promptContinueFirstBailPr_err promptContinueFirstUnknownPr
+Goekdeniz-Guelmez/Josiefied-Qwen3-8B-abliterated-v1 31.9383937941797 0.715692405345047 0 0 0 0 0 0 0 0
+{} 0 0 14.408182669681274 0.5391186746507745 0 0 0 0 0 0
+{} 0 0 0 0 0.9226993865030675 0.1472218163219984 0 0 0 0
+{} 0 0 0 0 0 0 0 0.8858895705521473 0.14430113449604268 0
+huihui-ai/Qwen3-8B-abliterated 17.020649158288734 0.5769305972672153 0 0 0 0 0 0 0 0
+{} 0 0 5.1063175599820045 0.33806200925940316 0 0 0 0 0 0
+{} 0 0 0 0 0.7165644171779142 0.12999209404813541 0 0 0 0
+{} 0 0 0 0 0 0 0 0.6208588957055216 0.12113448264133891 0
+mlabonne/Qwen3-8B-abliterated 3.1409569020147887 0.26796689526364276 0 0 0 0 0 0 0 0
+{} 0 0 0.1478415051142862 0.060136102309035384 0 0 0 0 0 0
+{} 0 0 0 0 6.588957055214724 0.3809562926399603 0 0 0 0
+{} 0 0 0 0 0 0 0 1.173006134969325 0.16567185874472068 0
+Qwen3-8B 3.226965790224221 0.27148360275565236 0 0 0 0 0 0 0 0
+{} 0 0 0.8991619599787004 0.1453612530986273 0 0 0 0 0 0
+{} 0 0 0 0 0.2773006134969325 0.08156624723598353 0 0 0 0
+{} 0 0 0 0 0 0 0 1.6613496932515337 0.19653246279099754 0
+}\datatable
+
+
+\begin{axis}[
+  ybar stacked,
+  width = \linewidth,
+  bar width = 8pt,
+  ymin=0, ymax=100,
+  xtick=data,
+  ylabel = {Average no-refusal bail \% on BailBench},
+  enlarge x limits = {abs = 20pt},
+  xticklabels from table={\datatable}{Label},
+  xticklabel style={xshift=12pt,rotate=90,align=center}, % ← rightwards shift
+  xtick style={draw=none},
+  enlarge y limits={value=0.05,upper},
+  legend style={cells={anchor=east},legend pos=north east},
+  reverse legend=false
+]
+    \addplot[fill=bailtool,
+           error bars/.cd,
+           y dir=both,
+           y explicit,
+          ]
+    table[
+        x expr=\coordindex,
+        y=toolBailPr,
+        y error plus=toolBailPr_err,
+        y error minus=toolBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail Tool}
+    \addplot[fill=bailstring,
+           error bars/.cd,
+           y dir=both,
+           y explicit,
+          ]
+    table[
+        x expr=\coordindex,
+        y=strBailPr,
+        y error plus=strBailPr_err,
+        y error minus=strBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail String}
+    \addplot[fill=bailpromptbailfirst,
+           error bars/.cd,
+           y dir=both,
+           y explicit
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptBailFirstBailPr,
+        y error plus=promptBailFirstBailPr_err,
+        y error minus=promptBailFirstBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail Prompt Bail-first}
+    \addplot[fill=bailpromptunknown
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptBailFirstUnknownPr,
+        forget plot,
+    ]{\datatable};
+    \addplot[fill=bailpromptcontinuefirst,
+           error bars/.cd,
+           y dir=both,
+           y explicit
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptContinueFirstBailPr,
+        y error plus=promptContinueFirstBailPr_err,
+        y error minus=promptContinueFirstBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail Prompt Continue-first}
+    \addplot[fill=bailpromptunknown
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptContinueFirstUnknownPr,
+        forget plot,
+    ]{\datatable};
+    \addplot[
+      draw=none,                       % nothing visible
+      fill=bailpromptunknown
+    ] coordinates {(0,0)};             % single dummy point
+    \addlegendentry{Refusal Classifier/Invalid Outputs}
+
+\end{axis}
+\end{tikzpicture}

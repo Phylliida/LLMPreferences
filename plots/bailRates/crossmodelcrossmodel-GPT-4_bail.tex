@@ -1,0 +1,124 @@
+
+% median: 0.2597852760736196
+
+\begin{tikzpicture}
+\definecolor{bailtool}{RGB}{155, 89, 182}                  % Purple (warm undertones)
+\definecolor{bailstring}{RGB}{231, 76, 60}                 % Bright Red
+\definecolor{bailpromptcontinuefirst}{RGB}{230, 126, 34}   % Standard Orange
+\definecolor{bailpromptbailfirst}{RGB}{243, 156, 18}       % Golden Orange
+\definecolor{bailpromptunknown}{RGB}{149,165,166}          % Gray
+\usetikzlibrary{patterns}
+\pgfplotstableread{
+Label toolBailPr toolBailPr_err strBailPr strBailPr_err promptBailFirstBailPr promptBailFirstBailPr_err promptBailFirstUnknownPr promptContinueFirstBailPr promptContinueFirstBailPr_err promptContinueFirstUnknownPr
+gpt-4o 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 53.06748466257669 0.76605942103434 1.5950920245398774 0 0 0
+{} 0 0 0 0 0 0 0 51.233128834355824 0.7672714080923859 0.5521472392638037
+google/gemma-2-2b-it 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 74.38036809815951 0.6701046958188195 1.116564417177914 0 0 0
+{} 0 0 0 0 0 0 0 25.374233128834355 0.66798752135783 0.9386503067484663
+claude-3-6-sonnet 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 26.742331288343557 0.6794404578620801 0.11042944785276074 0 0 0
+{} 0 0 0 0 0 0 0 34.58895705521473 0.7301477295279198 0.15337423312883436
+Qwen3-8B 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 4.306748466257669 0.3118067852241534 0.8159509202453988 0 0 0
+{} 0 0 0 0 0 0 0 26.582822085889568 0.6781485838201979 0.3006134969325153
+Qwen2.5-7B-Instruct 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 17.662576687116566 0.5854280824890445 0.38650306748466257 0 0 0
+{} 0 0 0 0 0 0 0 1.4969325153374233 0.18674624601234152 0.20245398773006135
+zai-org/GLM-4-32B-0414 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 0 0 0 0 0 0
+{} 0 0 0 0 0.15337423312883436 0.06120696568279042 1.5582822085889572 0 0 0
+{} 0 0 0 0 0 0 0 1.2699386503067485 0.1722638099530048 1.6503067484662577
+}\datatable
+
+
+\begin{axis}[
+  ybar stacked,
+  width = \linewidth,
+  bar width = 8pt,
+  ymin=0, ymax=100,
+  xtick=data,
+  ylabel = {Average bail \% on BailBench},
+  enlarge x limits = {abs = 20pt},
+  xticklabels from table={\datatable}{Label},
+  xticklabel style={xshift=12pt,rotate=90,align=center}, % ← rightwards shift
+  xtick style={draw=none},
+  enlarge y limits={value=0.05,upper},
+  legend style={cells={anchor=east},legend pos=north east},
+  reverse legend=false
+]
+    \addplot[fill=bailtool,
+           error bars/.cd,
+           y dir=both,
+           y explicit,
+          ]
+    table[
+        x expr=\coordindex,
+        y=toolBailPr,
+        y error plus=toolBailPr_err,
+        y error minus=toolBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail Tool}
+    \addplot[fill=bailstring,
+           error bars/.cd,
+           y dir=both,
+           y explicit,
+          ]
+    table[
+        x expr=\coordindex,
+        y=strBailPr,
+        y error plus=strBailPr_err,
+        y error minus=strBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail String}
+    \addplot[fill=bailpromptbailfirst,
+           error bars/.cd,
+           y dir=both,
+           y explicit
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptBailFirstBailPr,
+        y error plus=promptBailFirstBailPr_err,
+        y error minus=promptBailFirstBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail Prompt Bail-first}
+    \addplot[fill=bailpromptunknown
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptBailFirstUnknownPr,
+        forget plot,
+    ]{\datatable};
+    \addplot[fill=bailpromptcontinuefirst,
+           error bars/.cd,
+           y dir=both,
+           y explicit
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptContinueFirstBailPr,
+        y error plus=promptContinueFirstBailPr_err,
+        y error minus=promptContinueFirstBailPr_err
+    ]{\datatable};
+    \addlegendentry{Bail Prompt Continue-first}
+    \addplot[fill=bailpromptunknown
+          ]
+    table[
+        x expr=\coordindex,
+        y=promptContinueFirstUnknownPr,
+        forget plot,
+    ]{\datatable};
+    \addplot[
+      draw=none,                       % nothing visible
+      fill=bailpromptunknown
+    ] coordinates {(0,0)};             % single dummy point
+    \addlegendentry{Refusal Classifier/Invalid Outputs}
+
+\end{axis}
+\end{tikzpicture}

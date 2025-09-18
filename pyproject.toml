@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bailstudy"
+authors = [
+    {name = "Danielle Ensign", email = "phylliida.dev@gmail.com"},
+]
+description = "Studying preferences of LLMs"
+readme = "README.md"
+requires-python = ">=3.0"
+license = {text = "MIT License"}
+classifiers = [
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "vllm[tensorizer]",
+    "flashinfer-python",
+    "pandas",
+    "numpy",
+    "langchain",
+    "torch",
+    "ujson",
+    "setuptools",
+    "pyarrow",
+    "markdownify",
+    "pytz",
+    "huggingface-hub",
+    "langchain",
+    "transformers",
+    "safetytooling @ git+https://github.com/safety-research/safety-tooling.git@abhay/tools",
+    "pingouin",
+    "scipy",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/Phylliida/LLMPreferences.git"
+Issues = "https://github.com/Phylliida/LLMPreferences/issues"

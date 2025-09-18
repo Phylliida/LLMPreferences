@@ -1,0 +1,62 @@
+
+\begin{tikzpicture}
+\definecolor{refuseColor}{RGB}{231,76,60}
+\pgfplotstableread{
+Label refuseRate refuseRate_err
+claude-3-haiku 97.52805055921178 0.2386022546652178
+claude-3-5-haiku 97.08691879433503 0.25838571080852263
+claude-3-5-sonnet 97.56141413151617 0.23703097818854232
+claude-3-6-sonnet 97.30493857151818 0.24882787875610074
+claude-3-7-sonnet 93.72049780523525 0.37252645437821297
+claude-sonnet-4 91.71525801318981 0.4232417816876945
+claude-3-opus 97.65222037089703 0.2326949695889341
+claude-opus-4 88.94525920002395 0.4814217341396031
+claude-opus-4-1 90.29761679782575 0.4544470309803073
+}\datatable
+
+\begin{axis}[
+  ybar,
+  ymin = 0, ymax = 100,
+  width = \linewidth,
+  ylabel = {Average refusal \% on BailBench},
+  xtick = data,
+  xticklabels from table={\datatable}{Label},
+  xticklabel style={
+    rotate = 90,
+    align = center,
+  },
+  xtick style = {draw = none},
+  legend style = {cells = {anchor = west}, legend pos = south west},
+  reverse legend = true,
+  set layers,
+  extra y ticks=90.29761679782575,
+  % ... don't show any label and ...
+  extra y tick labels={},
+  % ... adapt the style to your needs
+  extra y tick style={
+      % in case you should remove the grid from the "normal" ticks ...
+      ymajorgrids=true,
+      % ... but don't show an extra tick (line)
+      ytick style={
+          /pgfplots/major tick length=0pt,
+      },
+      grid style={
+          black,
+          dashed,
+          % to draw this line before the bars, move it a higher layer
+          /pgfplots/on layer=axis foreground,
+      },
+  },
+]
+  \addplot[fill=refuseColor,
+           error bars/.cd,
+           y dir=both,
+           y explicit]
+    table[
+        y=refuseRate,
+        x expr=\coordindex,
+        y error plus=refuseRate_err,
+        y error minus=refuseRate_err
+    ]{\datatable};
+\end{axis}
+\end{tikzpicture}
