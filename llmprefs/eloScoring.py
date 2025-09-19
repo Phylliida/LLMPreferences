@@ -6,6 +6,7 @@ import numpy as np
 import functools
 import torch
 import math
+from collections import defaultdict
 
 def generateComparisonsGraph():
     global numCompares
@@ -31,7 +32,7 @@ def generateComparisonsGraph():
             correctRanking = torch.argsort(torch.tensor(data))
             ranking = torch.arange(0, numData, dtype=torch.long)
             def scoreRanking():
-                return torch.mean(torch.abs(ranking - correctRanking).float())
+                return torch.mean(torch.abs(ranking - correctRanking).float()).item()
             scores = []    
             def lessThanFunc(a,b):
                 global compareCache
@@ -41,7 +42,7 @@ def generateComparisonsGraph():
                     compareCache[(a,b)] = result
                     numCompares += 1
                     scores.append(scoreRanking())
-                if random.random() < -1:
+                if random.random() < 0.1:
                     return 1.0-result
                 else:
                     return result
@@ -50,8 +51,10 @@ def generateComparisonsGraph():
                 return [lessThanFunc(a,b) for (a,b) in asAndBs]
             print(f"running for {len(data)} datapoints")
             algorithm(data=data, ranking=ranking, lessThanFuncBatched=lessThanFuncBatched)
+            print([data[i] for i in ranking])
             scoresFromAllRuns.append(scores)
             numComparisonsFromAllRuns.append(numCompares)
+            print(numCompares)
         numComparisons.append((numData, numComparisonsFromAllRuns))
         maxLenScores = len(max(scoresFromAllRuns, key=lambda x: len(x)))
         confidence = 0.95 # 0.99
@@ -94,11 +97,13 @@ def batchedTrueskillBetter(data, ranking, lessThanFuncBatched):
     elos = [trueskill.Rating(25) for _ in data]
     eloMeans = torch.tensor([elo.mu for elo in elos])
     
-    doneSoFar = set()
+    doneSoFar = defaultdict(lambda: 0)
+    randomInitialPairs = []
     # random initial pairing to estimate elos
-    randomInitials = list(range(len(data)))
-    random.shuffle(randomInitials)
-    randomInitialPairs = [(randomInitials[i], randomInitials[len(data)-i-1]) for i in range(len(data)//2)]
+    for randomIters in range(5):
+        randomInitials = list(range(len(data)))
+        random.shuffle(randomInitials)
+        randomInitialPairs += [(randomInitials[i], randomInitials[len(data)-i-1]) for i in range(len(data)//2)]
     randomInitialPairsData = [(data[i], data[j]) for (i,j) in randomInitialPairs]
     for iIsLessThanJPr, (i,j) in zip(lessThanFuncBatched(randomInitialPairsData), randomInitialPairs):
         if iIsLessThanJPr < 0.5: # i wins
@@ -106,9 +111,9 @@ def batchedTrueskillBetter(data, ranking, lessThanFuncBatched):
         elif iIsLessThanJPr > 0.5: # j wins
             elos[j], elos[i] = trueskill.rate_1vs1(elos[j], elos[i])
         eloMeans[i], eloMeans[j] = elos[i].mu, elos[j].mu
-        doneSoFar.add((i,j))
-        doneSoFar.add((j,i))
-   
+        doneSoFar[i,j] += 1
+        doneSoFar[j,i] += 1
+
     numComparisons = 0
     offset = 0
     numTimesWithNoChanges = 0
@@ -132,7 +137,7 @@ def batchedTrueskillBetter(data, ranking, lessThanFuncBatched):
             if curJ < len(data):
                 currentI = sortedIndices[curI].item()
                 currentJ = sortedIndices[curJ].item()
-                if not (currentI, currentJ) in doneSoFar:
+                if not (currentI, currentJ) in doneSoFar or (doneSoFar[currentI, currentJ] < 5):
                     currentCompareBatch.append((currentI, currentJ))
         currentCompareBatchData = [(data[i], data[j]) for (i,j) in currentCompareBatch]
         for iIsLessThanJPr, (currentI, currentJ) in zip(lessThanFuncBatched(currentCompareBatchData), currentCompareBatch):
@@ -141,8 +146,8 @@ def batchedTrueskillBetter(data, ranking, lessThanFuncBatched):
             elif iIsLessThanJPr > 0.5: # j wins
                 elos[currentJ], elos[currentI] = trueskill.rate_1vs1(elos[currentJ], elos[currentI])
             eloMeans[currentI], eloMeans[currentJ] = elos[currentI].mu, elos[currentJ].mu
-            doneSoFar.add((currentI, currentJ))
-            doneSoFar.add((currentJ, currentI))
+            doneSoFar[currentI, currentJ] += 1
+            doneSoFar[currentJ, currentI] += 1
         
         ranking[:] = torch.argsort(eloMeans)
         numComparisons += 1
