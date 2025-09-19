@@ -2,6 +2,10 @@
 import trueskill
 import random
 import matplotlib.pyplot as plt
+import numpy as np
+import functools
+import torch
+import math
 
 def generateComparisonsGraph():
     global numCompares
@@ -11,7 +15,7 @@ def generateComparisonsGraph():
     algorithms = { }
     
     for i in np.linspace(10, 300, 20):
-        algorithms[f"trueskill {i}"] = (int(i), functools.partial(batchedTrueskillBetter, std=1))    
+        algorithms[f"trueskill {i}"] = (int(i), functools.partial(batchedTrueskillBetter))    
     numComparisons = []
     fig, ax = plt.subplots()
     for algorithmName, (numData, algorithm) in algorithms.items():
@@ -44,7 +48,7 @@ def generateComparisonsGraph():
             def lessThanFuncBatched(asAndBs):
                 print(f"doing {len(asAndBs)} comparisons")
                 return [lessThanFunc(a,b) for (a,b) in asAndBs]
-
+            print(f"running for {len(data)} datapoints")
             algorithm(data=data, ranking=ranking, lessThanFuncBatched=lessThanFuncBatched)
             scoresFromAllRuns.append(scores)
             numComparisonsFromAllRuns.append(numCompares)
@@ -126,12 +130,11 @@ def batchedTrueskillBetter(data, ranking, lessThanFuncBatched):
             curI = i*2+offset # we toggle ab ab ab b then #a ba ba ba
             curJ = i*2+offset+1
             if curJ < len(data):
-                currentI = sortedIndices[curI]
-                currentJ = sortedIndices[curJ]
+                currentI = sortedIndices[curI].item()
+                currentJ = sortedIndices[curJ].item()
                 if not (currentI, currentJ) in doneSoFar:
                     currentCompareBatch.append((currentI, currentJ))
         currentCompareBatchData = [(data[i], data[j]) for (i,j) in currentCompareBatch]
-
         for iIsLessThanJPr, (currentI, currentJ) in zip(lessThanFuncBatched(currentCompareBatchData), currentCompareBatch):
             if iIsLessThanJPr < 0.5: # i wins
                 elos[currentI], elos[currentJ] = trueskill.rate_1vs1(elos[currentI], elos[currentJ])
