@@ -38,10 +38,8 @@ def generateComparisonsGraph():
                 global compareCache
                 global numCompares
                 result = 1.0 if a < b else 0.0
-                if not (a,b) in compareCache:
-                    compareCache[(a,b)] = result
-                    numCompares += 1
-                    scores.append(scoreRanking())
+                numCompares += 1
+                scores.append(scoreRanking())
                 if random.random() < 0.1:
                     return 1.0-result
                 else:
