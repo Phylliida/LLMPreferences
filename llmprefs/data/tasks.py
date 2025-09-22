@@ -19,3 +19,5 @@ def loadTasks():
     random.seed(27)
     tasks = loadNeutralTasks() + loadWildchatTasks()
     random.shuffle(tasks)
+    splitPoint = int(len(tasks)*0.8)
+    return tasks[:splitPoint], tasks[splitPoint:]

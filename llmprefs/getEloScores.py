@@ -1,8 +1,10 @@
 import asyncio
+import functools
 
-from .data import loadTasks
-from .utils import getCachedFileJsonAsync, doesCachedFileJsonExistOrInProgress
-from .router import getParams
+from .data.tasks import loadTasks
+from .utils import getCachedFileJsonAsync, doesCachedFileJsonExistOrInProgress, runBatchedAsync
+from .router import getParams, getRouter
+from safetytooling.data_models import Prompt, ChatMessage, MessageRole, LLMResponse
 
 # This is the stuff that changes for different kinds of eval
 def getEvalInfo(modelName, inferenceType, evalType):
@@ -78,48 +80,66 @@ OPENAI_MODELS = [
     #("o1", "openai"),
 ]
 
-modelsToStudy = OPENWEIGHT_MODELS + ANTHROPIC_MODELS + OPENAI_MODELS
-modelsToStudy = [("Qwen/Qwen2.5-7B-Instruct", "vllm")] # testing
+modelsToStudy = ANTHROPIC_MODELS + OPENAI_MODELS + OPENWEIGHT_MODELS
+modelsToStudy = [("Qwen/Qwen2.5-7B-Instruct", "vllm"), ("google/gemma-2-9b-it", "vllm")]#, ("zai-org/GLM-4-32B-0414", "vllm")] # testing
 
 
-async def getTaskOutputs(nRolloutsPerPrompt, maxInferenceTokens=10000, batchSize=1000):
+async def getTaskOutputs(nRolloutsPerPrompt, maxInferenceTokens=8000, batchSize=1000):
     def modelStrToOutputPath(modelStr):
         return f"taskOutputs/{modelStr}.json"
     
-    def evalFunc(mdelId, inferenceType):
-        tasks = loadTasks()
-        router = getRouter(modelId, inferenceType, tensorizeModels=tensorizeModels)
-        evalInfo = getEvalInfo(modelId, inferenceType, evalType="taskOutputs")
-        tokenizeParams, inferenceParams = getParams(modelId, inferenceType, evalInfo, maxInferenceTokens):
-        
-        def getInputsFunc(task):
-            return [Prompt(messages=[ChatMessage(content=task, role=MessageRole.user)]) for _ in range(nRolloutsPerPrompt)]
-
-        async def processBatchFunc(inputBatch):
-            return await router.processPrompts(inputBatch, tokenizeParams, **inferenceParams)
-
-        def processOutputFunc(prompt, modelInputs, outputs):
-            results = []
-            # Add tool calls to output text
-            for output in outputs:
-                text = output[0].completion
-                results.append(text)
-            return results
-
-        return await runBatchedAsync(inputs=list(range(len(prompts))),
-                                getInputs=getInputsFunc,
-                                processBatch=processBatchFunc,
-                                processOutput=processOutputFunc,
-                                batchSize=batchSize,
-                                noCancel=True)
-
+    async def evalFunc(modelId, inferenceType):
+        tasksTrain, tasksTest = loadTasks()
+        tasks = tasksTrain + tasksTest
+        return await getRollouts(prompts=tasks, nRolloutsPerPrompt=nRolloutsPerPrompt, modelId=modelId, inferenceType=inferenceType, evalType="taskOutputs", maxInferenceTokens=maxInferenceTokens, batchSize=batchSize)
     outputs = await getOutputs(modelStrToOutputPath=modelStrToOutputPath, evalFunc=evalFunc)
-    if outputs == "return": return
+    if outputs == "return": return "return"
     
+async def getTaskTokenEstimates(nRolloutsPerPrompt, chainOfThought, evalName, train=True, maxInferenceTokens=8000, batchSize=1000):
+    def modelStrToOutputPath(modelStr):
+        return f"{evalName}/{modelStr}.json"
+    
+    async def evalFunc(modelId, inferenceType):
+        tasksTrain, tasksTest = loadTasks()
+        def taskToEstimate(task):
+            return f"Please estimate how many output tokens this task will take to complete.\nTask: {task}\nHow many output tokens will you use to complete this task? Answer in this format:\n{chainOfThought}<tokenEstimate>\nEstimated number of output tokens needed to complete task\n</tokenEstimate>"
+        tokenEstimates = list(map(taskToEstimate, tasksTrain if train else tastsTest))
+        return await getRollouts(prompts=tokenEstimates, nRolloutsPerPrompt=nRolloutsPerPrompt, modelId=modelId, inferenceType=inferenceType, evalType=evalName, maxInferenceTokens=maxInferenceTokens, batchSize=batchSize)
+    outputs = await getOutputs(modelStrToOutputPath=modelStrToOutputPath, evalFunc=evalFunc)
+    if outputs == "return": return "return"
+
+async def getRollouts(prompts, nRolloutsPerPrompt, modelId, inferenceType, evalType, maxInferenceTokens, batchSize):
+
+    router = getRouter(modelId, inferenceType)
+    evalInfo = getEvalInfo(modelId, inferenceType, evalType=evalType)
+    tokenizeParams, inferenceParams = getParams(modelId, inferenceType, evalInfo, maxInferenceTokens)
+    
+    def getInputsFunc(prompt):
+        return [Prompt(messages=[ChatMessage(content=prompt, role=MessageRole.user)]) for _ in range(nRolloutsPerPrompt)]
+
+    async def processBatchFunc(inputBatch):
+        return await router.processPrompts(inputBatch, tokenizeParams, **inferenceParams)
+
+    def processOutputFunc(prompt, modelInputs, outputs):
+        results = []
+        # Add tool calls to output text
+        for output in outputs:
+            text = output[0].completion
+            results.append(text)
+        return results
+
+    return await runBatchedAsync(inputs=prompts,
+                            getInputs=getInputsFunc,
+                            processBatch=processBatchFunc,
+                            processOutput=processOutputFunc,
+                            batchSize=batchSize,
+                            noCancel=True)
+
+
 
 async def getOutputs(modelStrToOutputPath, evalFunc):
     for modelId, inferenceType in modelsToStudy:
-        outputPath = modelIdToOutputPath(modelId.replace('/', '_'))
+        outputPath = modelStrToOutputPath(modelId.replace('/', '_'))
 
         if not doesCachedFileJsonExistOrInProgress(outputPath):
             modelEvalFunc = functools.partial(evalFunc, modelId=modelId, inferenceType=inferenceType)
@@ -129,12 +149,19 @@ async def getOutputs(modelStrToOutputPath, evalFunc):
     
     results = {}
     for modelId, inferenceType in modelsToStudy:
-        outputPath = modelIdToOutputPath(modelId)
-        results[modelId] = getCachedFileJsonAsync(outputPath, lambda: None)
+        outputPath = modelStrToOutputPath(modelId.replace('/', '_'))
+        results[modelId] = await getCachedFileJsonAsync(outputPath, lambda: None)
     return results
 
 
     
 
 if __name__ == "__main__":
-    asyncio.run(getTaskOutputs())
+    resOutputs = asyncio.run(getTaskOutputs(nRolloutsPerPrompt=10))
+    if resOutputs != "return":
+        resEstimates = asyncio.run(getTaskTokenEstimates(chainOfThought="", nRolloutsPerPrompt=10, evalName="estimates"))
+        if resEstimates != "return":
+            resEstimatesCot = asyncio.run(getTaskTokenEstimates(chainOfThought="<reasoning>\nChain of thought used to determine estimate\n</reasoning>\n", nRolloutsPerPrompt=10, evalName="estimatesCOT"))
+            if resEstimatesCot != "return":
+                for model, outputs in resOutputs.items():
+                    pass
