@@ -32,6 +32,7 @@ dependencies = [
     "safetytooling @ git+https://github.com/safety-research/safety-tooling.git@abhay/tools",
     "pingouin",
     "scipy",
+    "seaborn",
 ]
 dynamic = ["version"]
 

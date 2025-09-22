@@ -2,7 +2,9 @@ import asyncio
 import re
 import functools
 import numpy as np
-
+import seaborn as sns
+from pathlib import Path
+import matplotlib.pyplot as plt
 from .data.tasks import loadTasks
 from .utils import getCachedFileJsonAsync, doesCachedFileJsonExistOrInProgress, runBatchedAsync
 from .router import getParams, getRouter
@@ -96,6 +98,7 @@ async def getTaskOutputs(nRolloutsPerPrompt, maxInferenceTokens=8000, batchSize=
         return await getRollouts(prompts=tasks, nRolloutsPerPrompt=nRolloutsPerPrompt, modelId=modelId, inferenceType=inferenceType, evalType="taskOutputs", maxInferenceTokens=maxInferenceTokens, batchSize=batchSize)
     outputs = await getOutputs(modelStrToOutputPath=modelStrToOutputPath, evalFunc=evalFunc)
     if outputs == "return": return "return"
+    return outputs
     
 async def getTaskTokenEstimates(nRolloutsPerPrompt, chainOfThought, evalName, train=True, maxInferenceTokens=8000, batchSize=1000):
     def modelStrToOutputPath(modelStr):
@@ -109,6 +112,7 @@ async def getTaskTokenEstimates(nRolloutsPerPrompt, chainOfThought, evalName, tr
         return await getRollouts(prompts=tokenEstimates, nRolloutsPerPrompt=nRolloutsPerPrompt, modelId=modelId, inferenceType=inferenceType, evalType=evalName, maxInferenceTokens=maxInferenceTokens, batchSize=batchSize)
     outputs = await getOutputs(modelStrToOutputPath=modelStrToOutputPath, evalFunc=evalFunc)
     if outputs == "return": return "return"
+    return outputs
 
 async def getRollouts(prompts, nRolloutsPerPrompt, modelId, inferenceType, evalType, maxInferenceTokens, batchSize):
 
@@ -169,7 +173,8 @@ def extractTokenEstimate(text):
         return None
     estimateText = estimateText[:endOfEstimate]
     numbers = list(map(float, re.findall(r"\d+\.?\d*", text)))
-    return np.mean(np.array(numbers)) # if multiple, return mean (like if it gave a range 100-200)
+    # clamp it to resonable values in case weird stuff happened
+    return max(0, min(10000, np.mean(np.array(numbers)))) # if multiple, return mean (like if it gave a range 100-200)
     
 
 if __name__ == "__main__":
@@ -179,26 +184,53 @@ if __name__ == "__main__":
         if resEstimates != "return":
             resEstimatesCot = asyncio.run(getTaskTokenEstimates(chainOfThought="<reasoning>\nChain of thought used to determine estimate\n</reasoning>\n", nRolloutsPerPrompt=10, evalName="estimatesCOT"))
             if resEstimatesCot != "return":
-                for model, outputs in resOutputs.items():
-                    estimates = resEstimates[model]
-                    estimatesCot = resEstimates[model]
+                for modelId, outputs in resOutputs.items():
+                    estimates = resEstimates[modelId]
+                    estimatesCot = resEstimatesCot[modelId]
                     tasksTrain, tasksTest = loadTasks()
                     diffs = []
                     diffsCot = []
-                    for prompt, promptOutputs, estimateOutputs, estimateCotOutputs in enumerate(zip(tasksTrain, outputs, estimates, estimatesCot)):
+                    estimates = []
+                    estimatesCot = []
+                    tokenCosts = []
+                    for prompt, promptOutputs, estimateOutputs, estimateCotOutputs in zip(tasksTrain, outputs, estimates, estimatesCot):
                         averageTokensUsed = np.mean(np.array([output['output_tokens'] for output in promptOutputs]))
+                        tokenCosts.append(averageTokensUsed)
                         averageEstimates = [est for est in [extractTokenEstimate(output['text']) for output in estimateOutputs] if not est is None]
                         averageCotEstimates = [est for est in [extractTokenEstimate(output['text']) for output in estimateCotOutputs] if not est is None]
                         averageEstimate = np.mean(np.array(averageEstimates)) if len(averageEstimates) > 0 else None
                         averageCotEstimate = np.mean(np.array(averageCotEstimates)) if len(averageCotEstimates) > 0 else None
+                        estimates.append(averageEstimate)
+                        estimatesCot.append(averageCotEstimate)
                         diffs.append((averageEstimate - averageTokensUsed) if not averageEstimate is None else None)
                         diffsCot.append((averageCotEstimate - averageTokensUsed) if not averageCotEstimate is None else None)
-                    print(model)
+                    print(modelId)
                     print("diffs")
                     print(diffs)
                     print("diffs cot")
                     print(diffsCot)
                     print("diffs mean")
-                    print(np.mean([x for x in diffs if not x is None]))
-                    print("diffs cot mean")
-                    print(np.mean([x for x in diffsCot if not x is None]))
+                    diffs = np.array([x for x in diffs if not x is None])
+                    diffsCot = np.array([x for x in diffsCot if not x is None])
+                    estimates = np.array([x for x in estimates if not x is None])
+                    estimatesCot = np.array([x for x in estimatesCot if not x is None])
+                    print(diffs)
+                    print(diffsCot)
+                    print(np.mean(np.abs(diffs))) # abs so positive and negative don't cancel out
+                    print(np.mean(np.abs(diffsCot)))
+                    modelStr = modelId.replace('/', '_')
+                    plotDir = f"plots/{modelStr}"
+                    Path(plotDir).mkdir(parents=True, exist_ok=True)
+                    def plotData(data, plotName):
+                        sns.histplot(data, kde=True, stat='density', bins='auto', color='royalblue')
+                        plt.savefig(f"{plotDir}/{plotName}.png",      # file name  ⇢  extension decides format
+                            dpi=300,                 # resolution
+                            bbox_inches="tight",     # trim extra margins
+                            facecolor="white",       # background; use 'none' for transparent PNG
+                        )
+                        plt.close()
+                    plotData(tokenCosts, "actual token costs")
+                    plotData(estimates, "estimated token costs")
+                    plotData(estimatesCot, "estimated token costs cot")
+                    plotData(diffs, "diffs")
+                    plotData(diffsCot, "diffs cot")
