@@ -1,5 +1,7 @@
 import asyncio
+import re
 import functools
+import numpy as np
 
 from .data.tasks import loadTasks
 from .utils import getCachedFileJsonAsync, doesCachedFileJsonExistOrInProgress, runBatchedAsync
@@ -154,7 +156,20 @@ async def getOutputs(modelStrToOutputPath, evalFunc):
         results[modelId] = await getCachedFileJsonAsync(outputPath, lambda: None)
     return results
 
-
+def extractTokenEstimate(text):
+    text = text.lower() # don't be case sensitive
+    text = re.sub(r"\s+", "", text) # ignore spaces cause they don't matter and may mess up the tag
+    estimateTag = "<tokenestimate>"
+    posOfStartOfEstimate = text.find(estimateTag)
+    if posOfStartOfEstimate == -1: # didn't give any estimate, bail
+        return None
+    estimateText = text[posOfStartOfEstimate + len(estimateTag):]
+    endOfEstimate = max(estimateText.find("<t"), estimateText.find("<\\t"), estimateText.find("</t"), estimateText.find("<//t"))
+    if endOfEstimate == -1:
+        return None
+    estimateText = estimateText[:endOfEstimate]
+    numbers = list(map(float, re.findall(r"\d+\.?\d*", text)))
+    return np.mean(np.array(numbers)) # if multiple, return mean (like if it gave a range 100-200)
     
 
 if __name__ == "__main__":
@@ -165,4 +180,25 @@ if __name__ == "__main__":
             resEstimatesCot = asyncio.run(getTaskTokenEstimates(chainOfThought="<reasoning>\nChain of thought used to determine estimate\n</reasoning>\n", nRolloutsPerPrompt=10, evalName="estimatesCOT"))
             if resEstimatesCot != "return":
                 for model, outputs in resOutputs.items():
-                    pass
+                    estimates = resEstimates[model]
+                    estimatesCot = resEstimates[model]
+                    tasksTrain, tasksTest = loadTasks()
+                    diffs = []
+                    diffsCot = []
+                    for prompt, promptOutputs, estimateOutputs, estimateCotOutputs in enumerate(zip(tasksTrain, outputs, estimates, estimatesCot)):
+                        averageTokensUsed = np.mean(np.array([output['output_tokens'] for output in promptOutputs]))
+                        averageEstimates = [est for est in [extractTokenEstimate(output['text']) for output in estimateOutputs] if not est is None]
+                        averageCotEstimates = [est for est in [extractTokenEstimate(output['text']) for output in estimateCotOutputs] if not est is None]
+                        averageEstimate = np.mean(np.array(averageEstimates)) if len(averageEstimates) > 0 else None
+                        averageCotEstimate = np.mean(np.array(averageCotEstimates)) if len(averageCotEstimates) > 0 else None
+                        diffs.append((averageEstimate - averageTokensUsed) if not averageEstimate is None else None)
+                        diffsCot.append((averageCotEstimate - averageTokensUsed) if not averageCotEstimate is None else None)
+                    print(model)
+                    print("diffs")
+                    print(diffs)
+                    print("diffs cot")
+                    print(diffsCot)
+                    print("diffs mean")
+                    print(np.mean([x for x in diffs if not x is None]))
+                    print("diffs cot mean")
+                    print(np.mean([x for x in diffsCot if not x is None]))
