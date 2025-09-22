@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLM Eval Viewer</title>
+  <style>
+    :root{
+      --bg:#0f1115; --panel:#151821; --text:#e7eaf0; --muted:#9aa3b2; --accent:#6ea8fe; --accent2:#7ee787; --danger:#ff6b6b;
+      --border:#232736; --chip:#1c2030;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;align-items:center;gap:12px;position:sticky;top:0;background:linear-gradient(180deg,var(--bg),rgba(15,17,21,.96));backdrop-filter: blur(6px);z-index:2}
+    header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+    .pill{border:1px solid var(--border);padding:6px 10px;border-radius:999px;background:var(--chip);color:var(--muted)}
+    .container{display:grid;grid-template-columns:300px 1fr;gap:12px;height:calc(100% - 92px)}
+    aside{border-right:1px solid var(--border);padding:12px;overflow:auto}
+    main{padding:12px;overflow:auto}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px}
+    .pad{padding:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .row > *{flex:none}
+    .grow{flex:1}
+    select, input[type="text"], button{background:#0f1220;border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:8px}
+    button{cursor:pointer}
+    button.primary{background:var(--accent);border-color:transparent;color:#0b0d14}
+    .list{margin:0;padding:0;list-style:none}
+    .item{padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;cursor:pointer}
+    .item:first-child{border-top:none}
+    .item:hover{background:#101425}
+    .item.active{background:#0e1330;border-left:3px solid var(--accent)}
+    .muted{color:var(--muted)}
+    .chip{font-size:12px;background:var(--chip);border:1px solid var(--border);padding:2px 8px;border-radius:999px;color:var(--muted)}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0b0e18;border:1px solid #1a1f2e;border-radius:10px;padding:10px;max-height:50vh;overflow:auto}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--border);padding:8px 6px;text-align:left;vertical-align:top}
+    th{color:var(--muted);font-weight:600}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+    .stat{background:var(--chip);border:1px solid var(--border);border-radius:12px;padding:10px}
+    .stat .num{font-weight:700;font-size:18px}
+    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0b0f18;border:1px solid var(--border);padding:1px 6px;border-radius:6px;color:#cbd5e1}
+    .hint{font-size:12px;color:var(--muted)}
+    details{margin-top:8px}
+    .pass{color:var(--accent2)}
+    .fail{color:var(--danger)}
+    .diag{font-family:ui-monospace,monospace;background:#0b0f18;border:1px solid var(--border);border-radius:10px;padding:10px}
+    .section{margin:8px 0}
+    .section h4{margin:0 0 6px 0;color:var(--muted);font-weight:600}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LLM Eval Viewer</h1>
+    <span class="pill">Auto-loading via <code>/LLMPreferences/cached/models.json</code></span>
+    <div class="grow"></div>
+    <div class="row" style="width:100%">
+      <input id="basePath" type="text" value="/LLMPreferences/cached" class="grow" placeholder="/cached base path" />
+      <button id="reloadBtn" class="primary">Reload</button>
+    </div>
+    <span class="hint">Expected layout: <code>/LLMPreferences/cached/{taskOutputs,estimates,estimatesCOT}/&lt;model&gt;.json</code>. Manifest file: <code>/LLMPreferences/cached/models.json</code> (array like <code>["google_gemma-2-9b-it", ...]</code>).</span>
+  </header>
+  <div class="container">
+    <aside>
+      <div class="panel pad">
+        <div class="row" style="margin-bottom:8px">
+          <select id="modelFilter" class="grow"></select>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <input id="searchBox" class="grow" type="text" placeholder="Search text… (regex ok)" />
+          <button id="exportBtn">Export CSV</button>
+        </div>
+        <div id="promptList" class="panel" style="max-height:60vh;overflow:auto"></div>
+        <details>
+          <summary>Diagnostics</summary>
+          <div class="diag">
+            <div class="row" style="margin:6px 0">
+              <button id="runTestsBtn">Run self‑tests</button>
+              <span class="muted">(verifies parsers & ingest logic)</span>
+            </div>
+            <div id="testOutput" class="muted"></div>
+          </div>
+        </details>
+      </div>
+    </aside>
+    <main>
+      <div class="panel pad">
+        <div class="row">
+          <div class="grid grow" id="stats">
+            <div class="stat"><div class="muted">Selected model</div><div class="num" id="statModel">—</div></div>
+            <div class="stat"><div class="muted">Prompt index</div><div class="num" id="statPrompt">—</div></div>
+            <div class="stat"><div class="muted">Avg tokens (outputs)</div><div class="num" id="avgOutTokens">—</div></div>
+            <div class="stat"><div class="muted">Avg est / estCOT</div><div class="num" id="avgEsts">—</div></div>
+          </div>
+        </div>
+        <div id="tableWrap" class="panel pad" style="margin-top:8px;overflow:auto">
+          <table id="detailTable">
+            <thead>
+              <tr><th>#</th><th>output_tokens</th><th>estimate</th><th>estimateCOT</th><th>text (from outputs)</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="fullPanel" class="panel pad" style="margin-top:8px">
+          <div class="section"><h4>Output</h4><pre id="fullText">—</pre></div>
+          <div class="section"><h4>Estimate (raw)</h4><pre id="fullTextEst">—</pre></div>
+          <div class="section"><h4>Estimate COT (raw)</h4><pre id="fullTextCot">—</pre></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // --- Data model ---
+    const store = { models: {} };
+
+    // --- Utilities & refs ---
+    const byId = (id) => document.getElementById(id);
+    const modelFilter = byId('modelFilter');
+    const searchBox   = byId('searchBox');
+    const promptList  = byId('promptList');
+    const statModel   = byId('statModel');
+    const statPrompt  = byId('statPrompt');
+    const avgOutTokensEl = byId('avgOutTokens');
+    const avgEstsEl  = byId('avgEsts');
+    const detailTable = byId('detailTable');
+    const fullTextEl  = byId('fullText');
+    const fullTextEstEl  = byId('fullTextEst');
+    const fullTextCotEl  = byId('fullTextCot');
+    const testOutput  = byId('testOutput');
+    const basePathInp = byId('basePath');
+    const exportBtn   = byId('exportBtn');
+    const reloadBtn   = byId('reloadBtn');
+
+    function baseName(path){
+      const p = (path||'').split(/[\\\/]/).pop();
+      return p ? p.replace(/\.json$/i,'') : '';
+    }
+
+    function extractTokenEstimate(text){
+      if(!text) return null;
+      const lower = String(text).toLowerCase();
+      const m = lower.match(/<\s*tokenestimate\s*>([\s\S]*?)<\s*\/\s*tokenestimate\s*>/i);
+      let region = m ? m[1] : lower;
+      const nums = [...region.matchAll(/\d+\.?\d*/g)].map(x=>parseFloat(x[0])).filter(x=>!Number.isNaN(x));
+      if(nums.length===0) return null;
+      return nums.reduce((a,b)=>a+b,0)/nums.length;
+    }
+
+    function ensureModel(model){
+      if(!store.models[model]) store.models[model] = { outputs: [], estimates: [], estimatesCOT: [] };
+      return store.models[model];
+    }
+
+    function normalizeData(raw){
+      if(Array.isArray(raw)) return raw; for(const k of Object.keys(raw||{})) if(Array.isArray(raw[k])) return raw[k]; return [];
+    }
+
+    function ingestOne(fileName, json){
+      const which = (fileName.includes('taskOutputs') ? 'outputs' : (fileName.includes('estimatesCOT') ? 'estimatesCOT' : (fileName.includes('estimates') ? 'estimates' : 'outputs')));
+      const model = baseName(fileName);
+      ensureModel(model)[which] = normalizeData(json);
+    }
+
+    function refreshFilters(){
+      const current = modelFilter.value;
+      const models = Object.keys(store.models).sort((a,b)=>a.localeCompare(b));
+      modelFilter.innerHTML = models.map(m=>`<option value="${m.replaceAll('"','&quot;')}">${m}</option>`).join('');
+      if(models.length>0){ modelFilter.value = current && models.includes(current) ? current : models[0]; }
+      refreshPromptList();
+    }
+
+    function refreshPromptList(){
+      const model = modelFilter.value; statModel.textContent = model || '—';
+      const outputs = store.models[model]?.outputs || [];
+      let regex = null; const q = searchBox.value.trim(); if(q){ try{ regex = new RegExp(q,'i'); }catch{} }
+      const items = [];
+      for(let i=0;i<outputs.length;i++){
+        const rollouts = Array.isArray(outputs[i]) ? outputs[i] : [];
+        if(regex){ const hit = rollouts.some(r=>regex.test(r.text||'')); if(!hit) continue; }
+        items.push({i,count: rollouts.length});
+      }
+      const ul = document.createElement('ul'); ul.className='list';
+      items.forEach(({i,count})=>{
+        const li = document.createElement('li'); li.className='item';
+        li.innerHTML = `<div class="chip">#${i}</div><div class="grow muted">${count} rollouts</div>`;
+        li.onclick = ()=>selectPrompt(i);
+        ul.appendChild(li);
+      });
+      promptList.innerHTML = ''; promptList.appendChild(ul);
+      if(items.length>0){ selectPrompt(items[0].i); } else { renderDetails(null); }
+    }
+
+    function selectPrompt(index){
+      const model = modelFilter.value;
+      const rolloutsOut = store.models[model]?.outputs?.[index] || [];
+      const rolloutsEst = store.models[model]?.estimates?.[index] || [];
+      const rolloutsCot = store.models[model]?.estimatesCOT?.[index] || [];
+      renderDetails({model,index,rolloutsOut,rolloutsEst,rolloutsCot});
+    }
+
+    function mean(arr){ const xs = arr.filter(x=>Number.isFinite(x)); return xs.length? xs.reduce((a,b)=>a+b,0)/xs.length : null; }
+    function renderFull(oText, eText, cText){ fullTextEl.textContent = oText || '—'; fullTextEstEl.textContent = eText || '—'; fullTextCotEl.textContent = cText || '—'; }
+
+    function renderDetails(sel){
+      const tbody = detailTable.querySelector('tbody'); tbody.innerHTML = '';
+      if(!sel){ statPrompt.textContent='—'; avgOutTokensEl.textContent='—'; avgEstsEl.textContent='—'; renderFull('—','—','—'); return; }
+      const {index,rolloutsOut,rolloutsEst,rolloutsCot} = sel; statPrompt.textContent = index;
+      const n = Math.max(rolloutsOut.length, rolloutsEst.length, rolloutsCot.length);
+      let firstO='—', firstE='—', firstC='—'; const outTokens=[], estVals=[], estCotVals=[];
+      for(let k=0;k<n;k++){
+        const o = rolloutsOut[k]||{}; const e = rolloutsEst[k]||{}; const c = rolloutsCot[k]||{};
+        const est = extractTokenEstimate(e.text); const estCot = extractTokenEstimate(c.text); const ot = (typeof o.output_tokens==='number')? o.output_tokens : null;
+        outTokens.push(ot); estVals.push(est); estCotVals.push(estCot);
+        if(k===0){ firstO = o.text || '—'; firstE = e.text || '—'; firstC = c.text || '—'; }
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${k+1}</td><td>${ot!=null?ot:''}</td><td>${est!=null?est.toFixed(2):''}</td><td>${estCot!=null?estCot.toFixed(2):''}</td><td>${escapeHtml((o.text||'')).slice(0,400)}</td>`;
+        tr.onclick = ()=>{ renderFull(o.text, e.text, c.text); };
+        tbody.appendChild(tr);
+      }
+      const avgOut = mean(outTokens); const avgEst = mean(estVals); const avgCot = mean(estCotVals);
+      avgOutTokensEl.textContent = avgOut!=null? avgOut.toFixed(2) : '—';
+      avgEstsEl.textContent = (avgEst!=null? avgEst.toFixed(2):'—') + ' / ' + (avgCot!=null? avgCot.toFixed(2):'—');
+      renderFull(firstO, firstE, firstC);
+    }
+
+    function escapeHtml(s){
+      return String(s || '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+    }
+
+    function exportCSV(){
+      const model = modelFilter.value;
+      const outs = store.models[model]?.outputs || [];
+      const ests = store.models[model]?.estimates || [];
+      const cots = store.models[model]?.estimatesCOT || [];
+      const rows = [["model","prompt_index","rollout_index","output_tokens","estimate","estimateCOT","text","estimate_raw","estimateCOT_raw"]];
+      const M = Math.max(outs.length, ests.length, cots.length);
+      for(let i=0;i<M;i++){
+        const ro = outs[i]||[]; const re = ests[i]||[]; const rc = cots[i]||[]; const n = Math.max(ro.length, re.length, rc.length);
+        for(let k=0;k<n;k++){
+          const o = ro[k]||{}; const e = re[k]||{}; const c = rc[k]||{}; const est = extractTokenEstimate(e.text); const estCot = extractTokenEstimate(c.text);
+          rows.push([ model, i, k, (typeof o.output_tokens==='number'? o.output_tokens : ''), (est!=null? est : ''), (estCot!=null? estCot : ''), (o.text||'').replaceAll('\n','\\n'), (e.text||'').replaceAll('\n','\\n'), (c.text||'').replaceAll('\n','\\n') ]);
+        }
+      }
+      const csv = rows.map(row=>row.map(x=>`"${String(x).replaceAll('"','""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${sanitizeFile(model)}_merged.csv`; a.click(); URL.revokeObjectURL(a.href);
+    }
+
+    function sanitizeFile(x){ return String(x||'data').replace(/[^a-z0-9._-]+/gi,'_'); }
+
+    // --- Manifest loader only ---
+    async function loadFromManifest(base){
+      store.models = {}; // reset before load
+      const problems = [];
+      const kinds = ['taskOutputs','estimates','estimatesCOT'];
+      try{
+        const res = await fetch(`${base.replace(/\/$/,'')}/models.json`, { credentials:'include' });
+        if(!res.ok) throw new Error(res.status+': '+res.statusText);
+        const models = await res.json();
+        if(!Array.isArray(models)) throw new Error('models.json must be an array of model names');
+        for(const model of models){
+          for(const kind of kinds){
+            const url = `${base.replace(/\/$/,'')}/${kind}/${model}.json`;
+            try{
+              const r = await fetch(url, { credentials:'include' });
+              if(!r.ok) throw new Error(r.status+': '+r.statusText);
+              const json = await r.json();
+              ingestOne(`${kind}/${model}.json`, json);
+            }catch(e){ problems.push(`Missing or unreadable: ${url} (${e})`); }
+          }
+        }
+      }catch(e){ problems.push('Failed to read models.json ('+e+')'); }
+      refreshFilters(); if(problems.length){ console.warn('Warnings:', problems); alert('Loaded with warnings:\n'+problems.join('\n')); }
+    }
+
+    // Events
+    exportBtn.addEventListener('click', exportCSV);
+    modelFilter.addEventListener('change', refreshPromptList);
+    searchBox.addEventListener('input', refreshPromptList);
+    reloadBtn.addEventListener('click', ()=> loadFromManifest(basePathInp.value || '/LLMPreferences/cached'));
+
+    // Auto-load on page ready
+    window.addEventListener('DOMContentLoaded', ()=>{
+      loadFromManifest(basePathInp.value || '/LLMPreferences/cached');
+    });
+
+    // --- Simple self-tests (kept minimal & independent of server) ---
+    function assertEq(name, got, exp){
+      const ok = (Number.isNaN(got) && Number.isNaN(exp)) ? true : (got===exp);
+      const el = document.createElement('div'); el.innerHTML = `<span class="${ok?'pass':'fail'}">${ok?'✔':'✘'}</span> <strong>${name}</strong> → got: <code>${String(got)}</code> expected: <code>${String(exp)}</code>`; testOutput.appendChild(el); return ok;
+    }
+    function runTests(){
+      testOutput.innerHTML='';
+      const T=(name,fn)=>{ try{ fn(); }catch(e){ const el=document.createElement('div'); el.className='fail'; el.textContent=`✘ ${name} threw ${e}`; testOutput.appendChild(el);} };
+      T('extract: simple', ()=> assertEq('estimate simple', extractTokenEstimate('<tokenEstimate>120</tokenEstimate>'), 120));
+      T('extract: mean', ()=> assertEq('estimate mean', Math.round(extractTokenEstimate('<tokenEstimate>100 to 200</tokenEstimate>')), 150));
+      T('extract: no tag', ()=> assertEq('estimate no tag', extractTokenEstimate('It will take ~ 42 tokens.'), 42));
+      T('extract: none', ()=> assertEq('estimate none', extractTokenEstimate('no numbers here'), null));
+    }
+    byId('runTestsBtn').addEventListener('click', runTests);
+  </script>
+</body>
+</html>
