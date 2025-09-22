@@ -165,16 +165,15 @@ def getRouter(modelId, inferenceType, tensorizeModels: bool = False) -> safetyto
             # for local inference, we want to process whole batch, not seperate tasks, this way is faster
             prompts = [vllm.TokensPrompt(prompt_token_ids=router.tokenize(prompt.messages, **tokenizeArgs).tolist()) for prompt in prompts]
             generations = router.generate(prompts, sampling_params=vllm.SamplingParams(**inferenceArgs), use_tqdm=False)
-            print(generations[0])
             # reformat outputs to look like other outputs
             # max tokens is fine for now, we could do better later
             responses = []
             for prompt, generation in zip(prompts, generations):
-                input_tokens = len(prompt.prompt_token_ids)
+                input_tokens = len(prompt['prompt_token_ids'])
                 generationResponses = []
                 for output in generation.outputs:
-                    output_tokens = len(generation.token_ids)
-                    generationResponses.append(model_id=modelId, completion=output.text, stop_reason="max_tokens", usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=input_tokens+output_tokens))
+                    output_tokens = len(output.token_ids)
+                    generationResponses.append(LLMResponse(model_id=modelId, completion=output.text, stop_reason="max_tokens", usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=input_tokens+output_tokens)))
                 responses.append(generationResponses)
             return responses
         router.processPrompts = processPrompts

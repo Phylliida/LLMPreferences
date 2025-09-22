@@ -125,7 +125,8 @@ async def getRollouts(prompts, nRolloutsPerPrompt, modelId, inferenceType, evalT
         # Add tool calls to output text
         for output in outputs:
             text = output[0].completion
-            results.append(text)
+            text_tokens = output[0].usage.output_tokens
+            results.append({"text": text, "output_tokens": text_tokens})
         return results
 
     return await runBatchedAsync(inputs=prompts,
