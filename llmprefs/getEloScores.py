@@ -87,7 +87,7 @@ OPENAI_MODELS = [
 ]
 
 modelsToStudy = ANTHROPIC_MODELS + OPENAI_MODELS + OPENWEIGHT_MODELS
-modelsToStudy = [("Qwen/Qwen2.5-7B-Instruct", "vllm"), ("google/gemma-2-9b-it", "vllm")]#, ("zai-org/GLM-4-32B-0414", "vllm")] # testing
+modelsToStudy = [("Qwen/Qwen2.5-7B-Instruct", "vllm"), ("google/gemma-2-9b-it", "vllm"), ("zai-org/GLM-4-32B-0414", "vllm")] # testing
 
 
 async def getTaskOutputs(nRolloutsPerPrompt, maxInferenceTokens=8000, batchSize=1000):

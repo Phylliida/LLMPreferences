@@ -5,10 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LLM Eval Viewer</title>
   <style>
-    :root{
-      --bg:#0f1115; --panel:#151821; --text:#e7eaf0; --muted:#9aa3b2; --accent:#6ea8fe; --accent2:#7ee787; --danger:#ff6b6b;
-      --border:#232736; --chip:#1c2030;
-    }
+    :root{ --bg:#0f1115; --panel:#151821; --text:#e7eaf0; --muted:#9aa3b2; --accent:#6ea8fe; --accent2:#7ee787; --danger:#ff6b6b; --border:#232736; --chip:#1c2030; }
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial}
@@ -56,10 +53,10 @@
     <span class="pill">Auto-loading via <code>/LLMPreferences/cached/models.json</code></span>
     <div class="grow"></div>
     <div class="row" style="width:100%">
-      <input id="basePath" type="text" value="/LLMPreferences/cached" class="grow" placeholder="/cached base path" />
+      <input id="basePath" type="text" value="/LLMPreferences/cached" class="grow" placeholder="/LLMPreferences/cached base path" />
       <button id="reloadBtn" class="primary">Reload</button>
     </div>
-    <span class="hint">Expected layout: <code>/LLMPreferences/cached/{taskOutputs,estimates,estimatesCOT}/&lt;model&gt;.json</code>. Manifest file: <code>/LLMPreferences/cached/models.json</code> (array like <code>["google_gemma-2-9b-it", ...]</code>).</span>
+    <span class="hint">Deep links enabled — copy the URL to share the current model/prompt/rollout.</span>
   </header>
   <div class="container">
     <aside>
@@ -112,8 +109,12 @@
   </div>
 
   <script>
+    // --- Config ---
+    const DEFAULT_BASE = '/LLMPreferences/cached';
+
     // --- Data model ---
     const store = { models: {} };
+    let dataLoaded = false;
 
     // --- Utilities & refs ---
     const byId = (id) => document.getElementById(id);
@@ -132,6 +133,26 @@
     const basePathInp = byId('basePath');
     const exportBtn   = byId('exportBtn');
     const reloadBtn   = byId('reloadBtn');
+
+    // --- Deep-link (hash) helpers ---
+    function parseHash(){
+      const h = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
+      const sp = new URLSearchParams(h);
+      const base = sp.get('base') || '';
+      const m = sp.get('m') || '';
+      const p = sp.has('p') ? Number(sp.get('p')) : null;
+      const r = sp.has('r') ? Number(sp.get('r')) : null;
+      return { base, m, p, r };
+    }
+    function setHash({base, m, p, r}, replace=false){
+      const sp = new URLSearchParams();
+      if(base && base !== DEFAULT_BASE) sp.set('base', base);
+      if(m) sp.set('m', m);
+      if(Number.isInteger(p)) sp.set('p', String(p));
+      if(Number.isInteger(r)) sp.set('r', String(r));
+      const newHash = '#' + sp.toString();
+      if(replace) history.replaceState(null, '', newHash); else location.hash = newHash;
+    }
 
     function baseName(path){
       const p = (path||'').split(/[\\\/]/).pop();
@@ -167,7 +188,11 @@
       const current = modelFilter.value;
       const models = Object.keys(store.models).sort((a,b)=>a.localeCompare(b));
       modelFilter.innerHTML = models.map(m=>`<option value="${m.replaceAll('"','&quot;')}">${m}</option>`).join('');
-      if(models.length>0){ modelFilter.value = current && models.includes(current) ? current : models[0]; }
+      const desired = parseHash().m;
+      if(models.length>0){
+        const next = (desired && models.includes(desired)) ? desired : (current && models.includes(current) ? current : models[0]);
+        modelFilter.value = next;
+      }
       refreshPromptList();
     }
 
@@ -184,20 +209,28 @@
       const ul = document.createElement('ul'); ul.className='list';
       items.forEach(({i,count})=>{
         const li = document.createElement('li'); li.className='item';
-        li.innerHTML = `<div class="chip">#${i}</div><div class="grow muted">${count} rollouts</div>`;
-        li.onclick = ()=>selectPrompt(i);
+        li.innerHTML = `<div class=\"chip\">#${i}</div><div class=\"grow muted\">${count} rollouts</div>`;
+        li.onclick = ()=>{ setHash({ base: currentBase(), m: modelFilter.value, p: i, r: 0 }); selectPrompt(i, 0); };
         ul.appendChild(li);
       });
       promptList.innerHTML = ''; promptList.appendChild(ul);
-      if(items.length>0){ selectPrompt(items[0].i); } else { renderDetails(null); }
+
+      const { p, r } = parseHash();
+      if(items.length>0){
+        const idx = (Number.isInteger(p) && p>=0 && p<outputs.length) ? p : items[0].i;
+        selectPrompt(idx, Number.isInteger(r) ? r : 0, /*fromHash*/true);
+      } else {
+        renderDetails(null);
+      }
     }
 
-    function selectPrompt(index){
+    function selectPrompt(index, initialRollout=0, fromHash=false){
       const model = modelFilter.value;
       const rolloutsOut = store.models[model]?.outputs?.[index] || [];
       const rolloutsEst = store.models[model]?.estimates?.[index] || [];
       const rolloutsCot = store.models[model]?.estimatesCOT?.[index] || [];
-      renderDetails({model,index,rolloutsOut,rolloutsEst,rolloutsCot});
+      renderDetails({model,index,rolloutsOut,rolloutsEst,rolloutsCot,initialRollout});
+      if(!fromHash){ setHash({ base: currentBase(), m: model, p: index, r: initialRollout }); }
     }
 
     function mean(arr){ const xs = arr.filter(x=>Number.isFinite(x)); return xs.length? xs.reduce((a,b)=>a+b,0)/xs.length : null; }
@@ -206,7 +239,7 @@
     function renderDetails(sel){
       const tbody = detailTable.querySelector('tbody'); tbody.innerHTML = '';
       if(!sel){ statPrompt.textContent='—'; avgOutTokensEl.textContent='—'; avgEstsEl.textContent='—'; renderFull('—','—','—'); return; }
-      const {index,rolloutsOut,rolloutsEst,rolloutsCot} = sel; statPrompt.textContent = index;
+      const {index,rolloutsOut,rolloutsEst,rolloutsCot,initialRollout=0} = sel; statPrompt.textContent = index;
       const n = Math.max(rolloutsOut.length, rolloutsEst.length, rolloutsCot.length);
       let firstO='—', firstE='—', firstC='—'; const outTokens=[], estVals=[], estCotVals=[];
       for(let k=0;k<n;k++){
@@ -216,13 +249,20 @@
         if(k===0){ firstO = o.text || '—'; firstE = e.text || '—'; firstC = c.text || '—'; }
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${k+1}</td><td>${ot!=null?ot:''}</td><td>${est!=null?est.toFixed(2):''}</td><td>${estCot!=null?estCot.toFixed(2):''}</td><td>${escapeHtml((o.text||'')).slice(0,400)}</td>`;
-        tr.onclick = ()=>{ renderFull(o.text, e.text, c.text); };
+        tr.onclick = ()=>{ setHash({ base: currentBase(), m: modelFilter.value, p: index, r: k }); renderFull(o.text, e.text, c.text); };
         tbody.appendChild(tr);
       }
       const avgOut = mean(outTokens); const avgEst = mean(estVals); const avgCot = mean(estCotVals);
       avgOutTokensEl.textContent = avgOut!=null? avgOut.toFixed(2) : '—';
       avgEstsEl.textContent = (avgEst!=null? avgEst.toFixed(2):'—') + ' / ' + (avgCot!=null? avgCot.toFixed(2):'—');
-      renderFull(firstO, firstE, firstC);
+
+      const rows = tbody.querySelectorAll('tr');
+      if(rows.length){
+        const idx = Math.max(0, Math.min(initialRollout, rows.length-1));
+        rows[idx].dispatchEvent(new Event('click'));
+      } else {
+        renderFull(firstO, firstE, firstC);
+      }
     }
 
     function escapeHtml(s){
@@ -251,7 +291,7 @@
 
     // --- Manifest loader only ---
     async function loadFromManifest(base){
-      store.models = {}; // reset before load
+      store.models = {}; dataLoaded = false; // reset before load
       const problems = [];
       const kinds = ['taskOutputs','estimates','estimatesCOT'];
       try{
@@ -271,21 +311,44 @@
           }
         }
       }catch(e){ problems.push('Failed to read models.json ('+e+')'); }
-      refreshFilters(); if(problems.length){ console.warn('Warnings:', problems); alert('Loaded with warnings:\n'+problems.join('\n')); }
+      dataLoaded = true;
+      refreshFilters();
+      if(problems.length){ console.warn('Warnings:', problems); alert('Loaded with warnings:\n'+problems.join('\n')); }
     }
+
+    // Current base path from input or hash
+    function currentBase(){
+      const h = parseHash();
+      return (h.base || basePathInp.value || DEFAULT_BASE);
+    }
+
+    // Respond to hash changes (Back/Forward navigation or shared links)
+    window.addEventListener('hashchange', ()=>{
+      if(!dataLoaded) return; // wait until data load completes
+      const { base, m, p, r } = parseHash();
+      if(base && base !== basePathInp.value){ basePathInp.value = base; }
+      const models = Object.keys(store.models);
+      if(m && models.includes(m)){
+        if(modelFilter.value !== m){ modelFilter.value = m; refreshPromptList(); return; } // refresh will read p/r
+        const outputs = store.models[m]?.outputs || [];
+        if(Number.isInteger(p) && p>=0 && p<outputs.length){ selectPrompt(p, Number.isInteger(r)? r : 0, /*fromHash*/true); }
+      }
+    });
 
     // Events
     exportBtn.addEventListener('click', exportCSV);
-    modelFilter.addEventListener('change', refreshPromptList);
+    modelFilter.addEventListener('change', ()=>{ setHash({ base: currentBase(), m: modelFilter.value, p: 0, r: 0 }); refreshPromptList(); });
     searchBox.addEventListener('input', refreshPromptList);
-    reloadBtn.addEventListener('click', ()=> loadFromManifest(basePathInp.value || '/LLMPreferences/cached'));
+    reloadBtn.addEventListener('click', ()=> loadFromManifest(basePathInp.value || DEFAULT_BASE));
 
-    // Auto-load on page ready
+    // Auto-load on page ready (preserve any shared deep-link hash entirely)
     window.addEventListener('DOMContentLoaded', ()=>{
-      loadFromManifest(basePathInp.value || '/LLMPreferences/cached');
+      const { base } = parseHash();
+      if(base){ basePathInp.value = base; }
+      loadFromManifest(currentBase());
     });
 
-    // --- Simple self-tests (kept minimal & independent of server) ---
+    // --- Simple self-tests ---
     function assertEq(name, got, exp){
       const ok = (Number.isNaN(got) && Number.isNaN(exp)) ? true : (got===exp);
       const el = document.createElement('div'); el.innerHTML = `<span class="${ok?'pass':'fail'}">${ok?'✔':'✘'}</span> <strong>${name}</strong> → got: <code>${String(got)}</code> expected: <code>${String(exp)}</code>`; testOutput.appendChild(el); return ok;
