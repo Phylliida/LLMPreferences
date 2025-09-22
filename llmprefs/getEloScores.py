@@ -4,7 +4,9 @@ import functools
 import numpy as np
 import seaborn as sns
 from pathlib import Path
+import json
 import matplotlib.pyplot as plt
+from scipy.stats.mstats import median_cihs
 from .data.tasks import loadTasks
 from .utils import getCachedFileJsonAsync, doesCachedFileJsonExistOrInProgress, runBatchedAsync
 from .router import getParams, getRouter
@@ -179,6 +181,8 @@ def extractTokenEstimate(text):
 
 if __name__ == "__main__":
     resOutputs = asyncio.run(getTaskOutputs(nRolloutsPerPrompt=10))
+    with open("cached/models.json", "w") as f:
+        json.dump(sorted(list([modelId.replace('/', '_') for modelId in resOutputs.keys()])), f)
     if resOutputs != "return":
         resEstimates = asyncio.run(getTaskTokenEstimates(chainOfThought="", nRolloutsPerPrompt=10, evalName="estimates"))
         if resEstimates != "return":
@@ -190,8 +194,8 @@ if __name__ == "__main__":
                     tasksTrain, tasksTest = loadTasks()
                     diffs = []
                     diffsCot = []
-                    estimates = []
-                    estimatesCot = []
+                    averageEstimatesArr = []
+                    averageEstimatesCotArr = []
                     tokenCosts = []
                     for prompt, promptOutputs, estimateOutputs, estimateCotOutputs in zip(tasksTrain, outputs, estimates, estimatesCot):
                         averageTokensUsed = np.mean(np.array([output['output_tokens'] for output in promptOutputs]))
@@ -200,29 +204,24 @@ if __name__ == "__main__":
                         averageCotEstimates = [est for est in [extractTokenEstimate(output['text']) for output in estimateCotOutputs] if not est is None]
                         averageEstimate = np.mean(np.array(averageEstimates)) if len(averageEstimates) > 0 else None
                         averageCotEstimate = np.mean(np.array(averageCotEstimates)) if len(averageCotEstimates) > 0 else None
-                        estimates.append(averageEstimate)
-                        estimatesCot.append(averageCotEstimate)
+                        averageEstimatesArr.append(averageEstimate)
+                        averageEstimatesCotArr.append(averageCotEstimate)
                         diffs.append((averageEstimate - averageTokensUsed) if not averageEstimate is None else None)
                         diffsCot.append((averageCotEstimate - averageTokensUsed) if not averageCotEstimate is None else None)
                     print(modelId)
-                    print("diffs")
-                    print(diffs)
-                    print("diffs cot")
-                    print(diffsCot)
-                    print("diffs mean")
                     diffs = np.array([x for x in diffs if not x is None])
                     diffsCot = np.array([x for x in diffsCot if not x is None])
-                    estimates = np.array([x for x in estimates if not x is None])
-                    estimatesCot = np.array([x for x in estimatesCot if not x is None])
-                    print(diffs)
-                    print(diffsCot)
-                    print(np.mean(np.abs(diffs))) # abs so positive and negative don't cancel out
-                    print(np.mean(np.abs(diffsCot)))
+                    estimates = np.array([x for x in averageEstimatesArr if not x is None])
+                    estimatesCot = np.array([x for x in averageEstimatesCotArr if not x is None])
+                    print("diffs median")
+                    print(np.median(diffs), median_cihs(diffs, alpha=0.05))
+                    print("diffs cot median")
+                    print(np.median(diffsCot), median_cihs(diffsCot, alpha=0.05))
                     modelStr = modelId.replace('/', '_')
                     plotDir = f"plots/{modelStr}"
                     Path(plotDir).mkdir(parents=True, exist_ok=True)
                     def plotData(data, plotName):
-                        sns.histplot(data, kde=True, stat='density', bins='auto', color='royalblue')
+                        sns.histplot(data, kde=False, stat='density', bins='auto', color='royalblue')
                         plt.savefig(f"{plotDir}/{plotName}.png",      # file name  ⇢  extension decides format
                             dpi=300,                 # resolution
                             bbox_inches="tight",     # trim extra margins
