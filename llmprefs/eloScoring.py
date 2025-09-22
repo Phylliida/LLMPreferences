@@ -209,3 +209,46 @@ def simpleTrueskillBetter(data, ranking, lessThanFunc):
                 return torch.argsort(eloMeans)
         if numTimesWithNoChanges > 5: # bail if no changes
             return torch.argsort(eloMeans)
+
+
+
+async def getRollouts(nRolloutsPerPrompt, batchSize, modelId, inferenceType, evalInfo, maxInferenceTokens=1000):
+    router = getRouter(modelId, inferenceType)
+    tokenizeParams, inferenceParams = getParams(modelId, inferenceType, evalInfo, maxInferenceTokens)
+    prompts = [x['content'] for x in getDataset(evalInfo)]
+
+    def replaceEmpty(s):
+        return s if s != "" else "<Refusal Classifier Activated>"
+    def getInputsFunc(promptI):
+        # bail prompt adds prefix from previous rollout
+        if evalInfo['addBailPrompt'] is not None:
+            return [Prompt(messages=[
+                ChatMessage(content=prompts[promptI], role=MessageRole.user),
+                ChatMessage(content=replaceEmpty(evalInfo['rollout'][promptI][rolloutJ]), role=MessageRole.assistant),
+                ChatMessage(content=evalInfo['addBailPrompt'], role=MessageRole.user),
+            ]) for rolloutJ in range(nRolloutsPerPrompt)]
+        # otherwise, just simple stuff
+        else:
+            return [Prompt(messages=[ChatMessage(content=prompts[promptI], role=MessageRole.user)]) for _ in range(nRolloutsPerPrompt)]
+
+    async def processBatchFunc(inputBatch):
+        return await router.processPrompts(inputBatch, tokenizeParams, **inferenceParams)
+
+    def processOutputFunc(prompt, modelInputs, outputs):
+        results = []
+        # Add tool calls to output text
+        for output in outputs:
+            text = output[0].completion
+            for message in (output[0].generated_content if output[0].generated_content else []):
+                if message.role == MessageRole.tool and message.content['tool_name'] == getBailToolName(evalInfo['evalType']):
+                    text += '{"name": "' + getBailToolName(evalInfo['evalType']) + '", "arguments": {}}'
+            results.append(text)
+        return results
+
+    modelOutputs = await runBatchedAsync(inputs=list(range(len(prompts))),
+                              getInputs=getInputsFunc,
+                              processBatch=processBatchFunc,
+                              processOutput=processOutputFunc,
+                              batchSize=batchSize,
+                              noCancel=True)
+    return modelOutputs

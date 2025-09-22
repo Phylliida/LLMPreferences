@@ -1,5 +1,6 @@
 import os
 import json
+import random
 
 def loadNeutralTasks():
     taskDir = os.path.dirname(os.path.realpath(__file__))
@@ -15,4 +16,6 @@ def loadWildchatTasks():
         return [json.loads(line)['text'] for line in lines]
 
 def loadTasks():
-   tasks = loadNeutralTasks() + loadWildchatTasks()
+    random.seed(27)
+    tasks = loadNeutralTasks() + loadWildchatTasks()
+    random.shuffle(tasks)
