@@ -83,6 +83,9 @@
     </aside>
     <main>
       <div class="panel pad">
+        <div class="row" style="margin-bottom:8px">
+          <div class="stat" id="taskCard" style="width:100%"><div class="muted">Task</div><div class="num" id="statTask">—</div></div>
+        </div>
         <div class="row">
           <div class="grid grow" id="stats">
             <div class="stat"><div class="muted">Selected model</div><div class="num" id="statModel">—</div></div>
@@ -113,7 +116,7 @@
     const DEFAULT_BASE = '/LLMPreferences/cached';
 
     // --- Data model ---
-    const store = { models: {} };
+    const store = { models: {}, tasks: [] };
     let dataLoaded = false;
 
     // --- Utilities & refs ---
@@ -122,6 +125,7 @@
     const searchBox   = byId('searchBox');
     const promptList  = byId('promptList');
     const statModel   = byId('statModel');
+    const statTask    = byId('statTask');
     const statPrompt  = byId('statPrompt');
     const avgOutTokensEl = byId('avgOutTokens');
     const avgEstsEl  = byId('avgEsts');
@@ -209,7 +213,7 @@
       const ul = document.createElement('ul'); ul.className='list';
       items.forEach(({i,count})=>{
         const li = document.createElement('li'); li.className='item';
-        li.innerHTML = `<div class=\"chip\">#${i}</div><div class=\"grow muted\">${count} rollouts</div>`;
+        li.innerHTML = `<div class="chip">#${i}</div><div class="grow muted">${count} rollouts</div>`;
         li.onclick = ()=>{ setHash({ base: currentBase(), m: modelFilter.value, p: i, r: 0 }); selectPrompt(i, 0); };
         ul.appendChild(li);
       });
@@ -238,8 +242,11 @@
 
     function renderDetails(sel){
       const tbody = detailTable.querySelector('tbody'); tbody.innerHTML = '';
-      if(!sel){ statPrompt.textContent='—'; avgOutTokensEl.textContent='—'; avgEstsEl.textContent='—'; renderFull('—','—','—'); return; }
-      const {index,rolloutsOut,rolloutsEst,rolloutsCot,initialRollout=0} = sel; statPrompt.textContent = index;
+      if(!sel){ statPrompt.textContent='—'; statTask.textContent='—'; avgOutTokensEl.textContent='—'; avgEstsEl.textContent='—'; renderFull('—','—','—'); return; }
+      const {index,rolloutsOut,rolloutsEst,rolloutsCot,initialRollout=0} = sel; 
+      statPrompt.textContent = index; 
+      statTask.textContent = (Array.isArray(store.tasks) && store.tasks[index]!==undefined) ? store.tasks[index] : '—';
+
       const n = Math.max(rolloutsOut.length, rolloutsEst.length, rolloutsCot.length);
       let firstO='—', firstE='—', firstC='—'; const outTokens=[], estVals=[], estCotVals=[];
       for(let k=0;k<n;k++){
@@ -295,6 +302,17 @@
       const problems = [];
       const kinds = ['taskOutputs','estimates','estimatesCOT'];
       try{
+        // Load tasks first (optional but preferred)
+        try{
+          const tRes = await fetch(`${base.replace(/\/$/,'')}/tasks.json`, { credentials:'include' });
+          if(tRes.ok){
+            const tasks = await tRes.json();
+            if(Array.isArray(tasks)) store.tasks = tasks; else problems.push('tasks.json was not an array');
+          } else {
+            problems.push('Could not read tasks.json ('+tRes.status+': '+tRes.statusText+')');
+          }
+        }catch(err){ problems.push('Failed to fetch tasks.json ('+err+')'); }
+
         const res = await fetch(`${base.replace(/\/$/,'')}/models.json`, { credentials:'include' });
         if(!res.ok) throw new Error(res.status+': '+res.statusText);
         const models = await res.json();
@@ -356,10 +374,17 @@
     function runTests(){
       testOutput.innerHTML='';
       const T=(name,fn)=>{ try{ fn(); }catch(e){ const el=document.createElement('div'); el.className='fail'; el.textContent=`✘ ${name} threw ${e}`; testOutput.appendChild(el);} };
+      // existing tests
       T('extract: simple', ()=> assertEq('estimate simple', extractTokenEstimate('<tokenEstimate>120</tokenEstimate>'), 120));
       T('extract: mean', ()=> assertEq('estimate mean', Math.round(extractTokenEstimate('<tokenEstimate>100 to 200</tokenEstimate>')), 150));
       T('extract: no tag', ()=> assertEq('estimate no tag', extractTokenEstimate('It will take ~ 42 tokens.'), 42));
       T('extract: none', ()=> assertEq('estimate none', extractTokenEstimate('no numbers here'), null));
+      // new tests
+      T('escapeHtml', ()=> assertEq('escapeHtml', escapeHtml('& < > "'), '&amp; &lt; &gt; &quot;'));
+      T('baseName', ()=> assertEq('baseName', baseName('/a/b/c/google_gemma-2-9b-it.json'), 'google_gemma-2-9b-it'));
+      T('normalizeData (array)', ()=> assertEq('normalizeData array length', normalizeData([{x:1}]).length, 1));
+      T('normalizeData (object with array prop)', ()=> assertEq('normalizeData nested length', normalizeData({data:[{y:2}]}).length, 1));
+      T('mean', ()=> assertEq('mean([1,2,null,3])', Math.round((function(){ return (function(arr){ const xs = arr.filter(x=>Number.isFinite(x)); return xs.length? xs.reduce((a,b)=>a+b,0)/xs.length : null; })([1,2,null,3]); })()*10)/10, 2));
     }
     byId('runTestsBtn').addEventListener('click', runTests);
   </script>

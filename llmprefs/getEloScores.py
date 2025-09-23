@@ -5,6 +5,7 @@ import numpy as np
 import seaborn as sns
 from pathlib import Path
 import json
+from scipy.stats import linregress
 import matplotlib.pyplot as plt
 from scipy.stats.mstats import median_cihs
 import pandas as pd
@@ -180,10 +181,49 @@ def extractTokenEstimate(text):
     return max(0, min(10000, np.mean(np.array(numbers)))) # if multiple, return mean (like if it gave a range 100-200)
     
 
+def scatter_with_guides(df, xcol, ycol, fname,
+                        lim=(0, 2000),  # xmin/xmax and ymin/ymax
+                        title=None):
+    """
+    df   : pandas DataFrame containing the x & y columns
+    xcol : name of the column for the horizontal axis
+    ycol : name of the column for the vertical axis
+    fname: path (including .png) where the figure is saved
+    """
+    fig, ax = plt.subplots(figsize=(5, 5))
+
+    # 1) raw points
+    sns.scatterplot(df, x=xcol, y=ycol, ax=ax, color="royalblue", s=10)
+
+    # 2) y = x reference line
+    ax.plot(lim, lim, ls="--", c="gray", lw=1, label="y = x (correct predictions)")
+
+    # 3) OLS regression line
+    slope, intercept, r, *_ = linregress(df[xcol], df[ycol])
+    sns.regplot(df, x=xcol, y=ycol,
+                scatter=False, ax=ax, color="crimson",  # no extra dots
+                line_kws={"label": f"OLS: y = {slope:.2f}x + {intercept:.1f}\n"
+                                   f"$R^2$ = {r**2:.2f}"}, label="linear regression")
+
+    # cosmetics
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
+    ax.set_aspect("equal")            # keep squares square
+    if title:
+        ax.set_title(title, pad=10)
+    ax.legend(loc="upper left", frameon=False)
+    ax.set_xlabel(xcol)
+    ax.set_ylabel(ycol)
+
+    fig.savefig(fname, dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
 if __name__ == "__main__":
     resOutputs = asyncio.run(getTaskOutputs(nRolloutsPerPrompt=10))
     with open("cached/models.json", "w") as f:
         json.dump(sorted(list([modelId.replace('/', '_') for modelId in resOutputs.keys()])), f)
+        tasksTrain, tasksTest = loadTasks()
+    with open("cached/tasks.json", "w") as f:
+        json.dump(tasksTrain + tasksTest, f)
     if resOutputs != "return":
         resEstimates = asyncio.run(getTaskTokenEstimates(chainOfThought="", nRolloutsPerPrompt=10, evalName="estimates"))
         if resEstimates != "return":
@@ -250,21 +290,16 @@ if __name__ == "__main__":
                     plotData(diffsPercents, "diffs percents")
                     plotData(diffsPercentsCot, "diffs percents cot")
 
-                    sns.scatterplot(estimatesxy, x="actual token costs", y="estimated token costs")
-                    plt.xlim(0, 2000)
-                    plt.ylim(0, 2000)
-                    plt.savefig(f"{plotDir}/actual vs estimated.png",      # file name  ⇢  extension decides format
-                        dpi=300,                 # resolution
-                        bbox_inches="tight",     # trim extra margins
-                        facecolor="white",       # background; use 'none' for transparent PNG
-                    )
-                    plt.close()
-                    sns.scatterplot(estimatesxyCot, x="actual token costs", y="estimated token costs (cot)")
-                    plt.xlim(0, 2000)
-                    plt.ylim(0, 2000)
-                    plt.savefig(f"{plotDir}/actual vs estimated cot.png",      # file name  ⇢  extension decides format
-                        dpi=300,                 # resolution
-                        bbox_inches="tight",     # trim extra margins
-                        facecolor="white",       # background; use 'none' for transparent PNG
-                    )
-                    plt.close()
+                    scatter_with_guides(estimatesxy,
+                        xcol="actual token costs",
+                        ycol="estimated token costs",
+                        fname=f"{plotDir}/actual vs estimated.png",
+                        lim=(0, 2000),
+                        title=modelId + " Estimate vs. actual")
+
+                    scatter_with_guides(estimatesxyCot,
+                        xcol="actual token costs",
+                        ycol="estimated token costs (cot)",
+                        fname=f"{plotDir}/actual vs estimated cot.png",
+                        lim=(0, 2000),
+                        title=modelId + " Chain-of-thought estimate vs. actual")
