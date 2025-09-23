@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import matplotlib.pyplot as plt
 from scipy.stats.mstats import median_cihs
+import pandas as pd
 from .data.tasks import loadTasks
 from .utils import getCachedFileJsonAsync, doesCachedFileJsonExistOrInProgress, runBatchedAsync
 from .router import getParams, getRouter
@@ -87,7 +88,7 @@ OPENAI_MODELS = [
 ]
 
 modelsToStudy = ANTHROPIC_MODELS + OPENAI_MODELS + OPENWEIGHT_MODELS
-modelsToStudy = [("Qwen/Qwen2.5-7B-Instruct", "vllm"), ("google/gemma-2-9b-it", "vllm"), ("zai-org/GLM-4-32B-0414", "vllm")] # testing
+modelsToStudy = [("Qwen/Qwen2.5-7B-Instruct", "vllm"), ("google/gemma-2-9b-it", "vllm")] #, ("zai-org/GLM-4-32B-0414", "vllm")] # testing
 
 
 async def getTaskOutputs(nRolloutsPerPrompt, maxInferenceTokens=8000, batchSize=1000):
@@ -192,11 +193,13 @@ if __name__ == "__main__":
                     estimates = resEstimates[modelId]
                     estimatesCot = resEstimatesCot[modelId]
                     tasksTrain, tasksTest = loadTasks()
+                    tokenCosts = []
                     diffs = []
                     diffsCot = []
+                    diffsPercents = []
+                    diffsPercentsCot = []
                     averageEstimatesArr = []
                     averageEstimatesCotArr = []
-                    tokenCosts = []
                     for prompt, promptOutputs, estimateOutputs, estimateCotOutputs in zip(tasksTrain, outputs, estimates, estimatesCot):
                         averageTokensUsed = np.mean(np.array([output['output_tokens'] for output in promptOutputs]))
                         tokenCosts.append(averageTokensUsed)
@@ -208,11 +211,22 @@ if __name__ == "__main__":
                         averageEstimatesCotArr.append(averageCotEstimate)
                         diffs.append((averageEstimate - averageTokensUsed) if not averageEstimate is None else None)
                         diffsCot.append((averageCotEstimate - averageTokensUsed) if not averageCotEstimate is None else None)
+                        diffsPercents.append((averageEstimate/max(1,averageTokensUsed)*100) if not averageEstimate is None else None)
+                        diffsPercentsCot.append((averageCotEstimate/max(1, averageTokensUsed)*100) if not averageCotEstimate is None else None)
                     print(modelId)
+                    tokenCosts = np.array(tokenCosts)
+                    averageEstimatesArr = np.array(averageEstimatesArr)
+                    averageEstimatesCotArr = np.array(averageEstimatesCotArr)
                     diffs = np.array([x for x in diffs if not x is None])
                     diffsCot = np.array([x for x in diffsCot if not x is None])
-                    estimates = np.array([x for x in averageEstimatesArr if not x is None])
+                    diffsPercents = np.array([x for x in diffsPercents if not x is None])
+                    diffsPercentsCot = np.array([x for x in diffsPercentsCot if not x is None])
+                    estimatesxy = np.array([[y,x] for x,y in zip(averageEstimatesArr,tokenCosts) if not x is None])
+                    estimatesxy = pd.DataFrame({"actual token costs": estimatesxy[:,0], "estimated token costs": estimatesxy[:,1]})
                     estimatesCot = np.array([x for x in averageEstimatesCotArr if not x is None])
+                    estimatesxyCot = np.array([[y,x] for x,y in zip(estimatesCot,tokenCosts) if not x is None])
+                    estimatesxyCot = pd.DataFrame({"actual token costs": estimatesxyCot[:,0], "estimated token costs (cot)": estimatesxyCot[:,1]})
+                    print(tokenCosts)
                     print("diffs median")
                     print(np.median(diffs), median_cihs(diffs, alpha=0.05))
                     print("diffs cot median")
@@ -229,7 +243,28 @@ if __name__ == "__main__":
                         )
                         plt.close()
                     plotData(tokenCosts, "actual token costs")
-                    plotData(estimates, "estimated token costs")
-                    plotData(estimatesCot, "estimated token costs cot")
+                    plotData(averageEstimatesArr, "estimated token costs")
+                    plotData(averageEstimatesCotArr, "estimated token costs cot")
                     plotData(diffs, "diffs")
                     plotData(diffsCot, "diffs cot")
+                    plotData(diffsPercents, "diffs percents")
+                    plotData(diffsPercentsCot, "diffs percents cot")
+
+                    sns.scatterplot(estimatesxy, x="actual token costs", y="estimated token costs")
+                    plt.xlim(0, 2000)
+                    plt.ylim(0, 2000)
+                    plt.savefig(f"{plotDir}/actual vs estimated.png",      # file name  ⇢  extension decides format
+                        dpi=300,                 # resolution
+                        bbox_inches="tight",     # trim extra margins
+                        facecolor="white",       # background; use 'none' for transparent PNG
+                    )
+                    plt.close()
+                    sns.scatterplot(estimatesxyCot, x="actual token costs", y="estimated token costs (cot)")
+                    plt.xlim(0, 2000)
+                    plt.ylim(0, 2000)
+                    plt.savefig(f"{plotDir}/actual vs estimated cot.png",      # file name  ⇢  extension decides format
+                        dpi=300,                 # resolution
+                        bbox_inches="tight",     # trim extra margins
+                        facecolor="white",       # background; use 'none' for transparent PNG
+                    )
+                    plt.close()
